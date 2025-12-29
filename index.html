@@ -239,5 +239,118 @@
   load(false);
 })();
 </script>
+<script>
+(() => {
+  // 3× ENTER = Quick menu, 5× ENTER = Debug
+  let hits = [];
+  const WIN = 700;
+
+  const mk = (tag, css, html) => {
+    const el = document.createElement(tag);
+    if(css) el.style.cssText = css;
+    if(html!=null) el.innerHTML = html;
+    return el;
+  };
+
+  function overlay(title, bodyHtml){
+    const id="kbrew-overlay";
+    const old=document.getElementById(id);
+    if(old) old.remove();
+
+    const ov = mk("div",
+      "position:fixed;left:0;top:0;width:100%;height:100%;z-index:2147483647;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;font-family:sans-serif;color:#fff;"
+    );
+    ov.id=id;
+
+    const box = mk("div",
+      "background:#141414;border-radius:18px;padding:22px;min-width:520px;max-width:860px;box-shadow:0 12px 48px rgba(0,0,0,.6);"
+    );
+    box.innerHTML = `
+      <div style="font-size:22px;font-weight:800;margin-bottom:10px">${title}</div>
+      <div style="opacity:.9;line-height:1.35">${bodyHtml}</div>
+      <div style="margin-top:14px;opacity:.6;font-size:12px">Zavřeš BACK</div>
+    `;
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+
+    const close = () => { try { ov.remove(); } catch(e){} };
+    window.addEventListener("keydown", (e) => {
+      if(["Back","Backspace","BrowserBack"].includes(e.key)) close();
+    }, { once:true });
+
+    return { ov, box, close };
+  }
+
+  async function testService(){
+    const eps = [
+      "http://localhost:8085/api/install",
+      "http://127.0.0.1:8085/api/install",
+      "http://localhost:8080/api/install",
+      "http://127.0.0.1:8080/api/install"
+    ];
+    const out=[];
+    for(const ep of eps){
+      try{
+        const r = await fetch(ep, { method:"OPTIONS" });
+        out.push(`${ep} → ${r.status}`);
+      }catch(e){
+        out.push(`${ep} → FAIL`);
+      }
+    }
+    return out.join("<br>");
+  }
+
+  function quickMenu(){
+    const o = overlay("KristianBrew – Quick menu", `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+        <button id="qb-refresh" style="font-size:16px;padding:10px 12px;border-radius:12px;border:0;cursor:pointer">Refresh</button>
+        <button id="qb-clear"   style="font-size:16px;padding:10px 12px;border-radius:12px;border:0;cursor:pointer">Clear cache</button>
+        <button id="qb-test"    style="font-size:16px;padding:10px 12px;border-radius:12px;border:0;cursor:pointer">Test service</button>
+        <button id="qb-about"   style="font-size:16px;padding:10px 12px;border-radius:12px;border:0;cursor:pointer">About</button>
+      </div>
+      <div id="qb-out" style="margin-top:12px;opacity:.85;font-size:13px"></div>
+    `);
+
+    const out = o.ov.querySelector("#qb-out");
+    o.ov.querySelector("#qb-refresh").onclick = () => location.reload();
+    o.ov.querySelector("#qb-clear").onclick   = () => { try{ localStorage.clear(); }catch(e){} out.innerHTML="localStorage cleared ✔"; };
+    o.ov.querySelector("#qb-about").onclick   = () => { out.innerHTML = "3× ENTER = Quick menu, 5× ENTER = Debug.<br>BACK zavře."; };
+    o.ov.querySelector("#qb-test").onclick    = async () => { out.innerHTML="Testing…"; out.innerHTML = await testService(); };
+  }
+
+  function debugMenu(){
+    const o = overlay("KristianBrew – DEBUG", `
+      <div style="opacity:.9;font-size:13px">
+        <div><b>UserAgent:</b> ${navigator.userAgent}</div>
+        <div><b>URL:</b> ${location.href}</div>
+        <div style="margin-top:10px"><b>Service endpoints:</b><br><span id="dbg-ep">Testing…</span></div>
+      </div>
+    `);
+    testService().then(x => { const el=o.ov.querySelector("#dbg-ep"); if(el) el.innerHTML=x; });
+  }
+
+  // zachyt 3× / 5× ENTER v krátkém okně
+  window.addEventListener("keydown", (e) => {
+    if(e.key !== "Enter" && e.key !== "OK") return;
+
+    const now = Date.now();
+    hits = hits.filter(t => now - t < WIN);
+    hits.push(now);
+
+    if(hits.length === 3){
+      try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
+      quickMenu();
+    }
+    if(hits.length >= 5){
+      hits = [];
+      try{ e.preventDefault(); e.stopPropagation(); }catch(_){}
+      debugMenu();
+    }
+  }, true);
+
+  console.log("[KristianBrew] hotkeys: 3x ENTER (menu), 5x ENTER (debug)");
+})();
+</script>
 </body>
 </html>
+
