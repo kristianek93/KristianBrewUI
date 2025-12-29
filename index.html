@@ -1,0 +1,243 @@
+﻿<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KristianBrew</title>
+  <style>
+    body{margin:0;font-family:sans-serif;background:#06162a;color:#e9f0ff}
+    header{display:flex;gap:12px;align-items:center;padding:16px 18px;background:rgba(0,0,0,.25);position:sticky;top:0}
+    header h1{margin:0;font-size:22px}
+    input{flex:1;max-width:520px;font-size:18px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff}
+    .wrap{padding:18px}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:16px;min-height:120px;display:flex;flex-direction:column;gap:8px}
+    .title{font-size:18px;font-weight:700}
+    .meta{opacity:.75;font-size:13px}
+    .desc{opacity:.9;font-size:14px;line-height:1.3;flex:1}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    button{font-size:16px;padding:10px 12px;border-radius:12px;border:0;cursor:pointer}
+    button.primary{background:#2b7cff;color:#fff}
+    button.ghost{background:rgba(255,255,255,.12);color:#fff}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.10);font-size:12px}
+    .ok{color:#86ff9a}.bad{color:#ff8f8f}
+    .small{opacity:.7;font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>KristianBrew</h1>
+    <input id="q" placeholder="Hledej… (repo / appName / popis)" />
+    <span id="status" class="pill">loading…</span>
+  </header>
+
+  <div class="wrap">
+    <div class="row" style="margin-bottom:14px">
+      <button id="refresh" class="ghost">Refresh</button>
+      <button id="updateAll" class="primary">Update all</button>
+      <span class="small">Tip: Šipky + OK fungují nativně (focus je na buttons).</span>
+    </div>
+
+    <div id="grid" class="grid"></div>
+  </div>
+
+<script>
+(() => {
+  const GH_USER = "kristianek93";
+  const GRID = document.getElementById("grid");
+  const Q = document.getElementById("q");
+  const STATUS = document.getElementById("status");
+  const btnRefresh = document.getElementById("refresh");
+  const btnUpdateAll = document.getElementById("updateAll");
+
+  const cacheKey = "kbrew_cache_v1";
+
+  const setStatus = (txt, ok=true) => {
+    STATUS.textContent = txt;
+    STATUS.className = "pill " + (ok ? "ok" : "bad");
+  };
+
+  const ghJson = async (url) => {
+    const r = await fetch(url, { headers: { "Accept":"application/vnd.github+json" }});
+    if(!r.ok) throw new Error(url + " -> " + r.status);
+    return await r.json();
+  };
+
+  // Najde "kbrew.json" v rootu repa (pokud existuje)
+  const tryGetManifest = async (repo) => {
+    try {
+      const url = `https://raw.githubusercontent.com/${GH_USER}/${repo}/main/kbrew.json`;
+      const r = await fetch(url);
+      if(!r.ok) return null;
+      return await r.json();
+    } catch(e){ return null; }
+  };
+
+  const getLatestRelease = async (repo) => {
+    try {
+      return await ghJson(`https://api.github.com/repos/${GH_USER}/${repo}/releases/latest`);
+    } catch(e){
+      return null;
+    }
+  };
+
+  const pickWgtAsset = (release, regexStr) => {
+    if(!release || !release.assets) return null;
+    const re = new RegExp(regexStr || ".*\\\\.wgt$", "i");
+    return release.assets.find(a => re.test(a.name)) || null;
+  };
+
+  // Zkusíme detekovat TizenBrew install endpoint (pokud existuje)
+  // Tohle je “best-effort” – když endpoint není, přepneme na fallback (open download).
+  const tryInstallViaLocalService = async (downloadUrl) => {
+    const candidates = [
+      "http://localhost:8085/api/install",
+      "http://127.0.0.1:8085/api/install",
+      "http://localhost:8080/api/install",
+      "http://127.0.0.1:8080/api/install"
+    ];
+
+    for(const ep of candidates){
+      try{
+        const r = await fetch(ep, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ url: downloadUrl })
+        });
+        if(r.ok) return { ok:true, endpoint:ep, text: await r.text().catch(()=> "") };
+      }catch(e){}
+    }
+    return { ok:false };
+  };
+
+  const openUrl = (u) => { location.href = u; };
+
+  const render = (items) => {
+    GRID.innerHTML = "";
+    const q = (Q.value || "").toLowerCase().trim();
+    const filtered = items.filter(x => {
+      if(!q) return true;
+      return (x.repo + " " + x.name + " " + (x.description||"")).toLowerCase().includes(q);
+    });
+
+    for(const it of filtered){
+      const el = document.createElement("div");
+      el.className = "card";
+
+      const typePill = `<span class="pill">${it.type || "unknown"}</span>`;
+      const verPill  = it.version ? `<span class="pill">v${it.version}</span>` : `<span class="pill">no release</span>`;
+      const wgtPill  = it.wgt ? `<span class="pill ok">.wgt ✔</span>` : `<span class="pill bad">.wgt ✖</span>`;
+
+      el.innerHTML = `
+        <div class="row">
+          ${typePill} ${verPill} ${wgtPill}
+        </div>
+        <div class="title">${it.name || it.repo}</div>
+        <div class="meta">${it.repo}</div>
+        <div class="desc">${(it.description || "").replace(/</g,"&lt;")}</div>
+        <div class="row">
+          <button class="primary">Install / Update</button>
+          <button class="ghost">Open release</button>
+        </div>
+        <div class="small">${it.updatedAt ? ("updated: " + new Date(it.updatedAt).toLocaleString()) : ""}</div>
+      `;
+
+      const btnInstall = el.querySelector("button.primary");
+      const btnOpen = el.querySelector("button.ghost");
+
+      btnOpen.onclick = () => openUrl(it.releaseUrl || it.repoUrl);
+
+      btnInstall.onclick = async () => {
+        if(!it.wgtUrl){
+          alert("Repo nemá .wgt v latest release. Udělej Release s assetem *.wgt.");
+          return;
+        }
+
+        setStatus("installing…");
+        const res = await tryInstallViaLocalService(it.wgtUrl);
+        if(res.ok){
+          setStatus("installed via service ✔");
+          alert("Instalace přes local service OK.\n" + res.endpoint);
+        }else{
+          setStatus("no local service (fallback) …", false);
+          // fallback: otevřeme download (aspoň to funguje vždycky)
+          openUrl(it.wgtUrl);
+        }
+      };
+
+      GRID.appendChild(el);
+    }
+
+    if(filtered.length === 0){
+      GRID.innerHTML = `<div class="small">Nic nenalezeno.</div>`;
+    }
+  };
+
+  const load = async (force=false) => {
+    setStatus("loading…");
+    let cached = null;
+    if(!force){
+      try { cached = JSON.parse(localStorage.getItem(cacheKey) || "null"); } catch(e){}
+    }
+    if(cached && cached.items){
+      setStatus("cached ✔");
+      render(cached.items);
+    }
+
+    try{
+      // stáhneme repa
+      const repos = await ghJson(`https://api.github.com/users/${GH_USER}/repos?per_page=100&sort=updated`);
+      // pro každé repo zkus manifest + latest release
+      const items = [];
+      for(const r of repos){
+        const repo = r.name;
+        const mf = await tryGetManifest(repo);
+        const rel = await getLatestRelease(repo);
+
+        // pokud není manifest a není release s wgt, tak to přeskočíme (aby to nebyl bordel)
+        const asset = pickWgtAsset(rel, mf?.releaseAssetRegex);
+        if(!mf && !asset) continue;
+
+        items.push({
+          repo,
+          name: mf?.name || r.name,
+          type: mf?.type || "app",
+          description: mf?.description || r.description || "",
+          version: rel?.tag_name ? rel.tag_name.replace(/^v/i,"") : "",
+          wgt: !!asset,
+          wgtUrl: asset?.browser_download_url || "",
+          releaseUrl: rel?.html_url || "",
+          repoUrl: r.html_url,
+          updatedAt: r.updated_at
+        });
+      }
+
+      localStorage.setItem(cacheKey, JSON.stringify({ at:Date.now(), items }));
+      setStatus("online ✔");
+      render(items);
+    }catch(e){
+      setStatus("offline / error", false);
+      console.log(e);
+      if(!cached) GRID.innerHTML = `<div class="small">Chyba načtení: ${String(e)}</div>`;
+    }
+  };
+
+  btnRefresh.onclick = () => load(true);
+
+  btnUpdateAll.onclick = async () => {
+    // MVP: projede viditelné a zkusí install (update) – bez porovnání verze (to přidáme)
+    alert("Update all (MVP) – zatím jen koncept. Přidáme porovnání nainstalovaných verzí + batch instalace.");
+  };
+
+  Q.addEventListener("input", () => {
+    try{
+      const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      if(cached?.items) render(cached.items);
+    }catch(e){}
+  });
+
+  load(false);
+})();
+</script>
+</body>
+</html>

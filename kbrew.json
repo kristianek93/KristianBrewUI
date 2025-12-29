@@ -1,0 +1,9 @@
+﻿{
+  "id": "kristianbrew.ui",
+  "name": "KristianBrew",
+  "type": "app",
+  "description": "TV UI: instalace/updaty z GitHub Releases (.wgt) pro Kristianek93 repos.",
+  "icon": "icon.png",
+  "releaseAssetRegex": ".*\\\\.wgt$",
+  "homepage": "https://github.com/kristianek93/KristianBrewUI"
+}
